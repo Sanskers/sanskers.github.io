@@ -61,36 +61,42 @@
     return firstCell || null;
   }
 
-  let lastGoodValue = "0";   // start at 0 instead of --
+  let lastGoodNumber = null;   // numeric last accepted score
+  let lastShownText  = "--";   // what we display
+  let controller = null;       // prevent overlapping polls
 
   async function renderScore() {
+    // abort previous in-flight fetch to avoid overlap
+    if (controller) controller.abort();
+    controller = new AbortController();
+
     try {
       const url =
         CSV_SCORE_URL +
         (CSV_SCORE_URL.includes("?") ? "&" : "?") +
         "t=" + Date.now();
 
-      const resp = await fetch(url, { cache: "no-store" });
+      const resp = await fetch(url, { cache: "no-store", signal: controller.signal });
       const text = await resp.text();
 
-      const value = getFirstCellFromCSV(text);
+      const valueText = getFirstCellFromCSV(text);
 
-      // 🚨 THIS IS THE KEY CHANGE:
-      // If the cell is temporarily blank, DO NOTHING
-      if (value === null) {
-        document.getElementById("score").textContent = lastGoodValue;
+      // If blank/glitch, keep last shown value (no -- flicker)
+      if (valueText === null) {
+        document.getElementById("score").textContent = lastShownText;
         return;
       }
 
-      lastGoodValue = value;
-      document.getElementById("score").textContent = value;
+      const n = Number(valueText);
 
-    } catch (e) {
-      // On any error, keep last known good score
-      document.getElementById("score").textContent = lastGoodValue;
-    }
-  }
+      // If not a clean number, ignore (keep last)
+      if (!Number.isFinite(n)) {
+        document.getElementById("score").textContent = lastShownText;
+        return;
+      }
 
-  renderScore();
-  setInterval(renderScore, POLL_MS);
-</script>
+      // First valid read
+      if (lastGoodNumber === null) {
+        lastGoodNumber = n;
+        lastShownText = Str
+
