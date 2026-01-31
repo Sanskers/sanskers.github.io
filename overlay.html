@@ -47,49 +47,50 @@
   </div>
 
   <script>
-    /**
-     * Paste your published CSV URL here.
-     * It should look like:
-     * https://docs.google.com/spreadsheets/d/e/.../pub?gid=XXXX&single=true&output=csv
-     */
-    const CSV_SCORE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
+  const CSV_SCORE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
+  const POLL_MS = 1000;
 
-    // How often to poll (ms). 500–1500 works well.
-    const POLL_MS = 1000;
+  function getFirstCellFromCSV(csvText) {
+    const text = (csvText || "").trim();
+    if (!text) return null;
 
-    // Basic CSV first-cell extraction (matches your HSC simplicity)
-    function getFirstCellFromCSV(csvText) {
-      const text = (csvText || "").trim();
-      if (!text) return "";
+    const firstLine = text.split("\n")[0] || "";
+    let firstCell = firstLine.split(",")[0] || "";
+    firstCell = firstCell.replace(/^"|"$/g, "").trim();
 
-      // first line, first cell
-      const firstLine = text.split("\n")[0] || "";
-      let firstCell = firstLine.split(",")[0] || "";
+    return firstCell || null;
+  }
 
-      // strip surrounding quotes if present
-      firstCell = firstCell.replace(/^"|"$/g, "").trim();
-      return firstCell;
+  let lastGoodValue = "0";   // start at 0 instead of --
+
+  async function renderScore() {
+    try {
+      const url =
+        CSV_SCORE_URL +
+        (CSV_SCORE_URL.includes("?") ? "&" : "?") +
+        "t=" + Date.now();
+
+      const resp = await fetch(url, { cache: "no-store" });
+      const text = await resp.text();
+
+      const value = getFirstCellFromCSV(text);
+
+      // 🚨 THIS IS THE KEY CHANGE:
+      // If the cell is temporarily blank, DO NOTHING
+      if (value === null) {
+        document.getElementById("score").textContent = lastGoodValue;
+        return;
+      }
+
+      lastGoodValue = value;
+      document.getElementById("score").textContent = value;
+
+    } catch (e) {
+      // On any error, keep last known good score
+      document.getElementById("score").textContent = lastGoodValue;
     }
+  }
 
-    let lastGood = "--";
-
-    async function renderScore() {
-      try {
-        // Cache-bust like a champ (prevents sticky responses)
-        const url = CSV_SCORE_URL + (CSV_SCORE_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
-
-        const resp = await fetch(url, { cache: "no-store" });
-        const text = await resp.text();
-
-        const value = getFirstCellFromCSV(text);
-
-        // Don’t overwrite with blank glitches
-        if (!value) {
-          document.getElementById("score").textContent = lastGood;
-          return;
-        }
-
-        lastGood = value;
-        document.getElementById("score").textContent = value;
-      } catch (e) {
-        // If fetch fails, keep the last good val
+  renderScore();
+  setInterval(renderScore, POLL_MS);
+</script>
