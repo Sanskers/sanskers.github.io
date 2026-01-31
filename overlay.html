@@ -4,18 +4,14 @@
   <meta charset="UTF-8" />
   <title>DBD Score Overlay</title>
   <style>
-    /* transparent background for OBS */
     html, body {
-      margin: 0;
-      padding: 0;
+      margin: 0; padding: 0;
       background: transparent;
       overflow: hidden;
       font-family: Arial, sans-serif;
       color: #fff;
       text-shadow: 0 0 2px rgba(0,0,0,0.85);
     }
-
-    /* simple pill panel */
     #panel {
       display: inline-flex;
       flex-direction: column;
@@ -26,17 +22,24 @@
       background: rgba(0,0,0,0.55);
       user-select: none;
     }
-
     #label {
       font-size: 18px;
       letter-spacing: 0.14em;
       opacity: 0.9;
     }
-
     #score {
       font-size: 96px;
       font-weight: 900;
       line-height: 1;
+    }
+    /* Optional debug (remove later) */
+    #debug {
+      font-size: 12px;
+      opacity: 0.7;
+      max-width: 520px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   </style>
 </head>
@@ -44,59 +47,55 @@
   <div id="panel">
     <div id="label">SURVIVOR SCORE</div>
     <div id="score">--</div>
+    <div id="debug"></div>
   </div>
 
   <script>
-  const CSV_SCORE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
-  const POLL_MS = 1000;
+    // ✅ Paste your working published CSV URL here:
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
 
-  function getFirstCellFromCSV(csvText) {
-    const text = (csvText || "").trim();
-    if (!text) return null;
+    const POLL_MS = 1000;
+    let lastGood = null;
 
-    const firstLine = text.split("\n")[0] || "";
-    let firstCell = firstLine.split(",")[0] || "";
-    firstCell = firstCell.replace(/^"|"$/g, "").trim();
+    function extractFirstNumberAnywhere(text) {
+      // Finds the first integer/decimal (handles "23", " 23", "\"23\"", etc.)
+      const m = (text || "").match(/-?\d+(\.\d+)?/);
+      return m ? m[0] : null;
+    }
 
-    return firstCell || null;
-  }
+    async function tick() {
+      const scoreEl = document.getElementById("score");
+      const debugEl = document.getElementById("debug");
+      if (!scoreEl) return; // if ID mismatch, nothing will ever update
 
-  let lastGoodNumber = null;   // numeric last accepted score
-  let lastShownText  = "--";   // what we display
-  let controller = null;       // prevent overlapping polls
+      try {
+        const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
+        const resp = await fetch(url, { cache: "no-store" });
+        const raw = await resp.text();
 
-  async function renderScore() {
-    // abort previous in-flight fetch to avoid overlap
-    if (controller) controller.abort();
-    controller = new AbortController();
+        const n = extractFirstNumberAnywhere(raw);
 
-    try {
-      const url =
-        CSV_SCORE_URL +
-        (CSV_SCORE_URL.includes("?") ? "&" : "?") +
-        "t=" + Date.now();
+        // Debug shows what came back (helps diagnose instantly)
+        if (debugEl) debugEl.textContent = n ? `ok: ${n}` : `no number in response`;
 
-      const resp = await fetch(url, { cache: "no-store", signal: controller.signal });
-      const text = await resp.text();
+        // If Google returns a blank/glitch response, keep last good number
+        if (n === null) {
+          if (lastGood !== null) scoreEl.textContent = lastGood;
+          return;
+        }
 
-      const valueText = getFirstCellFromCSV(text);
+        lastGood = n;
+        scoreEl.textContent = n;
 
-      // If blank/glitch, keep last shown value (no -- flicker)
-      if (valueText === null) {
-        document.getElementById("score").textContent = lastShownText;
-        return;
+      } catch (e) {
+        // On error, keep last good value (no flicker)
+        if (debugEl) debugEl.textContent = "fetch error (keeping last)";
+        if (lastGood !== null) scoreEl.textContent = lastGood;
       }
+    }
 
-      const n = Number(valueText);
-
-      // If not a clean number, ignore (keep last)
-      if (!Number.isFinite(n)) {
-        document.getElementById("score").textContent = lastShownText;
-        return;
-      }
-
-      // First valid read
-      if (lastGoodNumber === null) {
-        lastGoodNumber = n;
-        lastShownText = Str
-
+    tick();
+    setInterval(tick, POLL_MS);
+  </script>
+</body>
+</html>
