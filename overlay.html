@@ -1,158 +1,95 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-   <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="30">  <!-- reload every 30 seconds -->
   <meta charset="UTF-8" />
-  <title>HSC Player Overlay</title>
+  <title>DBD Score Overlay</title>
   <style>
     /* transparent background for OBS */
     html, body {
-      margin: 0; padding: 0;
+      margin: 0;
+      padding: 0;
       background: transparent;
       overflow: hidden;
-    }
-
-    /* container for all cards */
-    #overlayGrid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 8px;
-    }
-
-    /* each player card */
-    .player-card-overlay {
-      position: relative;
-      width: 80px;
-      background: transparent;
-      text-align: center;
       font-family: Arial, sans-serif;
       color: #fff;
-      text-shadow: 0 0 2px rgba(0,0,0,0.8);
-    }
-    /* portrait */
-    .player-card-overlay img {
-      width: 100%;
-      height: 80px;
-      object-fit: cover;
-      border-radius: 4px;
-    }
-    /* grey out dead */
-    .player-card-overlay[data-status="dead"] img {
-      filter: grayscale(100%) opacity(0.5);
+      text-shadow: 0 0 2px rgba(0,0,0,0.85);
     }
 
-    /* pip icons */
-    .pip-overlay {
-      position: absolute;
-      top: 2px; right: 2px;
-      display: flex;
-      pointer-events: none;
-    }
-    .pip-overlay img {
-      width: 12px;
-      height: 12px;
-      margin-left: -4px;
+    /* simple pill panel */
+    #panel {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      user-select: none;
     }
 
-    /* text area under portrait */
-    .player-details-overlay {
-      margin-top: 2px;
-      font-size: 0.6rem;
-      line-height: 1.1;
-      pointer-events: none;
+    #label {
+      font-size: 18px;
+      letter-spacing: 0.14em;
+      opacity: 0.9;
     }
-    .player-details-overlay div {
-      margin: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+
+    #score {
+      font-size: 96px;
+      font-weight: 900;
+      line-height: 1;
     }
   </style>
 </head>
 <body>
-  <div id="overlayGrid"></div>
+  <div id="panel">
+    <div id="label">SURVIVOR SCORE</div>
+    <div id="score">--</div>
+  </div>
 
   <script>
-    // CSV split helper
-    function splitCSVLine(line) {
-      const re = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^",]*))/g;
-      const arr = [];
-      let m;
-      while ((m = re.exec(line))) {
-        arr.push(m[1] !== undefined
-          ? m[1].replace(/""/g, '"')
-          : m[2]
-        );
-      }
-      return arr;
+    /**
+     * Paste your published CSV URL here.
+     * It should look like:
+     * https://docs.google.com/spreadsheets/d/e/.../pub?gid=XXXX&single=true&output=csv
+     */
+    const CSV_SCORE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
+
+    // How often to poll (ms). 500–1500 works well.
+    const POLL_MS = 1000;
+
+    // Basic CSV first-cell extraction (matches your HSC simplicity)
+    function getFirstCellFromCSV(csvText) {
+      const text = (csvText || "").trim();
+      if (!text) return "";
+
+      // first line, first cell
+      const firstLine = text.split("\n")[0] || "";
+      let firstCell = firstLine.split(",")[0] || "";
+
+      // strip surrounding quotes if present
+      firstCell = firstCell.replace(/^"|"$/g, "").trim();
+      return firstCell;
     }
 
-    async function renderOverlay() {
-      const CSV_PLAYERS =
-        'https://docs.google.com/spreadsheets/d/e/2PACX-1vSuKBNjFUHOp6l8oLtOFIxIUkZUmXk0fyKkYtSrREuIlrOn8iJsZOEsvU0W0M3BUdiWdZ3kSHo66-iJ/pub?gid=0&single=true&output=csv';
+    let lastGood = "--";
 
-      const resp = await fetch(CSV_PLAYERS);
-      const text = await resp.text();
-      const lines = text.trim().split('\n');
-      if (lines.length < 2) return;
+    async function renderScore() {
+      try {
+        // Cache-bust like a champ (prevents sticky responses)
+        const url = CSV_SCORE_URL + (CSV_SCORE_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
 
-      const headers    = splitCSVLine(lines.shift());
-      const iPlayer    = headers.indexOf('Player');
-      const iImage     = headers.indexOf('ImageURL');
-      const iStatus    = headers.indexOf('Status');
-      const iPips      = headers.indexOf('Pips');
-      const iRank      = headers.indexOf('Rank');
-      const iPerks     = headers.indexOf('PerksAllowed'); // adjust if your header is 'Perks'
+        const resp = await fetch(url, { cache: "no-store" });
+        const text = await resp.text();
 
-      const grid = document.getElementById('overlayGrid');
+        const value = getFirstCellFromCSV(text);
 
-      lines.forEach(line => {
-        const cols   = splitCSVLine(line);
-        const name   = cols[iPlayer] || '';
-        const imgURL = cols[iImage]  || '';
-        const status = (cols[iStatus] || '').toLowerCase();
-        const pips   = parseInt(cols[iPips], 10) || 0;
-        const rank   = cols[iRank]   || '';
-        const perks  = cols[iPerks]  || '';
-
-        const card = document.createElement('div');
-        card.className      = 'player-card-overlay';
-        card.dataset.status = status;
-
-        // portrait
-        const img = document.createElement('img');
-        img.src = imgURL;
-        img.alt = name;
-        card.appendChild(img);
-
-        // pips overlay
-        const pipContainer = document.createElement('div');
-        pipContainer.className = 'pip-overlay';
-        for (let i = 0; i < pips; i++) {
-          const dot = document.createElement('img');
-          dot.src = 'https://i.imgur.com/KgiVO6X.png';
-          pipContainer.appendChild(dot);
+        // Don’t overwrite with blank glitches
+        if (!value) {
+          document.getElementById("score").textContent = lastGood;
+          return;
         }
-        card.appendChild(pipContainer);
 
-        // details under image
-        const details = document.createElement('div');
-        details.className = 'player-details-overlay';
-        details.innerHTML = `
-          <div>${name}</div>
-          <div>Rank: ${rank}</div>
-          <div>Pips: ${pips}</div>
-          <div style="white-space:normal;">${perks}</div>
-        `;
-        card.appendChild(details);
-
-        grid.appendChild(card);
-      });
-    }
-
-    renderOverlay();
-  </script>
-</body>
-</html>
+        lastGood = value;
+        document.getElementById("score").textContent = value;
+      } catch (e) {
+        // If fetch fails, keep the last good val
