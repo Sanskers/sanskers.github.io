@@ -1,137 +1,48 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>DBD Score Overlay</title>
+  <meta charset="utf-8" />
   <style>
-    html, body {
-      margin: 0; padding: 0;
-      background: transparent;
-      overflow: hidden;
-      font-family: Arial, sans-serif;
-      color: #fff;
-      text-shadow: 0 0 2px rgba(0,0,0,0.85);
-    }
-    #panel {
-      display: inline-flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      padding: 14px 18px;
-      border-radius: 14px;
-      background: rgba(0,0,0,0.55);
-      user-select: none;
-    }
-    #label {
-      font-size: 18px;
-      letter-spacing: 0.14em;
-      opacity: 0.9;
-    }
-    #score {
-      font-size: 96px;
-      font-weight: 900;
-      line-height: 1;
-    }
-    /* Optional debug (remove later) */
-    #debug {
-      font-size: 12px;
-      opacity: 0.7;
-      max-width: 520px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+    html, body { margin:0; background:transparent; overflow:hidden; font-family: Arial, sans-serif; color:#fff; }
+    #panel { display:inline-flex; flex-direction:column; align-items:center; gap:6px; padding:14px 18px;
+             border-radius:14px; background:rgba(0,0,0,0.55); text-shadow:0 0 2px rgba(0,0,0,0.85); }
+    #label { font-size:18px; letter-spacing:.14em; opacity:.9; }
+    #score { font-size:96px; font-weight:900; line-height:1; }
   </style>
 </head>
 <body>
   <div id="panel">
     <div id="label">SURVIVOR SCORE</div>
-    <div id="score">--</div>
-    <div id="debug"></div>
+    <div id="score">0</div>
   </div>
 
   <script>
-  const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
-  const POLL_MS = 1000;
+    const ENDPOINT = "https://script.google.com/macros/s/AKfycbw7XFX1iUM1EJI6SupQIzl5MXP7EQsvFRuTP8d-JEiqOni9fxC_moTyiulF93FJgAPL/exec";
+    const POLL_MS = 750;
 
-  // How many consecutive polls must show 0 before we accept it as a real reset
-  const ZERO_CONFIRM_POLLS = 3;
+    let lastTs = 0;
 
-  let lastGood = null;       // last accepted numeric score
-  let lastShown = "0";       // what we display (start at 0)
-  let zeroStreak = 0;        // consecutive "0" reads
-  let controller = null;     // abort overlap
+    async function tick() {
+      try {
+        const res = await fetch(ENDPOINT + (ENDPOINT.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return;
 
-  function extractFirstNumberAnywhere(text) {
-    const m = (text || "").match(/-?\d+(\.\d+)?/);
-    return m ? Number(m[0]) : null;
-  }
+        const data = await res.json();
+        const ts = Number(data.ts) || 0;
+        const score = (data.score ?? "").toString().trim();
 
-  async function tick() {
-    const scoreEl = document.getElementById("score");
-    if (!scoreEl) return;
+        // ignore stale responses
+        if (ts < lastTs) return;
+        lastTs = ts;
 
-    // prevent overlapping requests
-    if (controller) controller.abort();
-    controller = new AbortController();
-
-    try {
-      const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
-      const resp = await fetch(url, { cache: "no-store", signal: controller.signal });
-      const raw = await resp.text();
-
-      const n = extractFirstNumberAnywhere(raw);
-      if (n === null || !Number.isFinite(n)) {
-        scoreEl.textContent = lastShown;
-        return;
+        if (score !== "") document.getElementById("score").textContent = score;
+      } catch (e) {
+        // keep last value
       }
-
-      // first good read
-      if (lastGood === null) {
-        lastGood = n;
-        lastShown = String(n);
-        scoreEl.textContent = lastShown;
-        return;
-      }
-
-      // --- Reset handling: accept 0 only if it persists a few polls ---
-      if (n === 0 && lastGood !== 0) {
-        zeroStreak++;
-        if (zeroStreak >= ZERO_CONFIRM_POLLS) {
-          lastGood = 0;
-          lastShown = "0";
-          scoreEl.textContent = lastShown;
-          zeroStreak = 0;
-        } else {
-          // not confirmed yet; keep last shown
-          scoreEl.textContent = lastShown;
-        }
-        return;
-      } else {
-        zeroStreak = 0;
-      }
-
-      // --- Anti-flicker: never allow score to go backwards within a match ---
-      if (n < lastGood) {
-        scoreEl.textContent = lastShown;
-        return;
-      }
-
-      // accept same or higher
-      lastGood = n;
-      lastShown = String(n);
-      scoreEl.textContent = lastShown;
-
-    } catch (e) {
-      if (e && e.name === "AbortError") return;
-      scoreEl.textContent = lastShown;
     }
-  }
 
-  tick();
-  setInterval(tick, POLL_MS);
-</script>
-
+    tick();
+    setInterval(tick, POLL_MS);
+  </script>
 </body>
 </html>
-
