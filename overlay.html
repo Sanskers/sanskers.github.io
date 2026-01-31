@@ -51,51 +51,87 @@
   </div>
 
   <script>
-    // ✅ Paste your working published CSV URL here:
-    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
+  const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy3VpCfXtTRytB1KAbzL095jMEq8xlqHVMUf5ehKeko-SgdsKj-HBjIjhZ7Ir-K4b_2PraGVZBTUWa/pub?gid=850699496&single=true&output=csv";
+  const POLL_MS = 1000;
 
-    const POLL_MS = 1000;
-    let lastGood = null;
+  // How many consecutive polls must show 0 before we accept it as a real reset
+  const ZERO_CONFIRM_POLLS = 3;
 
-    function extractFirstNumberAnywhere(text) {
-      // Finds the first integer/decimal (handles "23", " 23", "\"23\"", etc.)
-      const m = (text || "").match(/-?\d+(\.\d+)?/);
-      return m ? m[0] : null;
-    }
+  let lastGood = null;       // last accepted numeric score
+  let lastShown = "0";       // what we display (start at 0)
+  let zeroStreak = 0;        // consecutive "0" reads
+  let controller = null;     // abort overlap
 
-    async function tick() {
-      const scoreEl = document.getElementById("score");
-      const debugEl = document.getElementById("debug");
-      if (!scoreEl) return; // if ID mismatch, nothing will ever update
+  function extractFirstNumberAnywhere(text) {
+    const m = (text || "").match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  }
 
-      try {
-        const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
-        const resp = await fetch(url, { cache: "no-store" });
-        const raw = await resp.text();
+  async function tick() {
+    const scoreEl = document.getElementById("score");
+    if (!scoreEl) return;
 
-        const n = extractFirstNumberAnywhere(raw);
+    // prevent overlapping requests
+    if (controller) controller.abort();
+    controller = new AbortController();
 
-        // Debug shows what came back (helps diagnose instantly)
-        if (debugEl) debugEl.textContent = n ? `ok: ${n}` : `no number in response`;
+    try {
+      const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
+      const resp = await fetch(url, { cache: "no-store", signal: controller.signal });
+      const raw = await resp.text();
 
-        // If Google returns a blank/glitch response, keep last good number
-        if (n === null) {
-          if (lastGood !== null) scoreEl.textContent = lastGood;
-          return;
-        }
-
-        lastGood = n;
-        scoreEl.textContent = n;
-
-      } catch (e) {
-        // On error, keep last good value (no flicker)
-        if (debugEl) debugEl.textContent = "fetch error (keeping last)";
-        if (lastGood !== null) scoreEl.textContent = lastGood;
+      const n = extractFirstNumberAnywhere(raw);
+      if (n === null || !Number.isFinite(n)) {
+        scoreEl.textContent = lastShown;
+        return;
       }
-    }
 
-    tick();
-    setInterval(tick, POLL_MS);
-  </script>
+      // first good read
+      if (lastGood === null) {
+        lastGood = n;
+        lastShown = String(n);
+        scoreEl.textContent = lastShown;
+        return;
+      }
+
+      // --- Reset handling: accept 0 only if it persists a few polls ---
+      if (n === 0 && lastGood !== 0) {
+        zeroStreak++;
+        if (zeroStreak >= ZERO_CONFIRM_POLLS) {
+          lastGood = 0;
+          lastShown = "0";
+          scoreEl.textContent = lastShown;
+          zeroStreak = 0;
+        } else {
+          // not confirmed yet; keep last shown
+          scoreEl.textContent = lastShown;
+        }
+        return;
+      } else {
+        zeroStreak = 0;
+      }
+
+      // --- Anti-flicker: never allow score to go backwards within a match ---
+      if (n < lastGood) {
+        scoreEl.textContent = lastShown;
+        return;
+      }
+
+      // accept same or higher
+      lastGood = n;
+      lastShown = String(n);
+      scoreEl.textContent = lastShown;
+
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      scoreEl.textContent = lastShown;
+    }
+  }
+
+  tick();
+  setInterval(tick, POLL_MS);
+</script>
+
 </body>
 </html>
+
